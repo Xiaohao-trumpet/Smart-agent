@@ -19,10 +19,18 @@ def model_node(state: Dict[str, Any], model_client: UniversalChat) -> Dict[str, 
         Updated state with response field populated
     """
     user_id = state["user_id"]
-    user_message = state["user_message"]
+    user_message = state.get("model_input_message", state["user_message"])
+    temperature = state.get("temperature")
+    max_tokens = state.get("max_tokens")
     
     # Call the model
-    response = model_client.chat(user_id=user_id, message=user_message)
+    response = model_client.chat(
+        user_id=user_id,
+        message=user_message,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        use_history=False,
+    )
     
     # Update state
     return {
@@ -31,7 +39,98 @@ def model_node(state: Dict[str, Any], model_client: UniversalChat) -> Dict[str, 
     }
 
 
-# Future node implementations (Phase 2+):
+def memory_retrieve_node(
+    state: Dict[str, Any],
+    short_term_manager,
+    memory_service,
+    memory_enabled: bool,
+    memory_top_k: int,
+) -> Dict[str, Any]:
+    """Retrieve short-term and long-term memories and inject into model input."""
+    if not memory_enabled:
+        return {
+            **state,
+            "model_input_message": state["user_message"],
+            "retrieved_memories": [],
+        }
+
+    user_id = state["user_id"]
+    user_message = state["user_message"]
+    session = state.get("session")
+
+    short_context_text = ""
+    if short_term_manager is not None and session is not None:
+        short_context = short_term_manager.build_context(session)
+        short_context_text = short_term_manager.render_context(short_context)
+
+    long_context_text = ""
+    retrieved_memories = []
+    if memory_service is not None:
+        search_results = memory_service.search_memories(user_id=user_id, query=user_message, top_k=memory_top_k)
+        retrieved_memories = [
+            {
+                "id": hit.memory.id,
+                "text": hit.memory.text,
+                "score": hit.score,
+                "tags": hit.memory.tags,
+                "metadata": hit.memory.metadata,
+            }
+            for hit in search_results
+        ]
+        if search_results:
+            lines = [f"- ({hit.score:.3f}) {hit.memory.text}" for hit in search_results]
+            long_context_text = "Relevant long-term memories:\n" + "\n".join(lines)
+
+    context_blocks = []
+    if short_context_text:
+        context_blocks.append(short_context_text)
+    if long_context_text:
+        context_blocks.append(long_context_text)
+
+    if context_blocks:
+        model_input_message = (
+            "Use the following memory context when relevant, but prioritize the latest user request.\n\n"
+            + "\n\n".join(context_blocks)
+            + "\n\nCurrent user message:\n"
+            + user_message
+        )
+    else:
+        model_input_message = user_message
+
+    return {
+        **state,
+        "model_input_message": model_input_message,
+        "retrieved_memories": retrieved_memories,
+    }
+
+
+def memory_write_node(
+    state: Dict[str, Any],
+    short_term_manager,
+    memory_service,
+    memory_enabled: bool,
+    memory_write_enabled: bool,
+) -> Dict[str, Any]:
+    """Persist short-term turn and optionally extract/store long-term memory."""
+    user_message = state.get("user_message", "")
+    response = state.get("response", "")
+    user_id = state.get("user_id")
+    session = state.get("session")
+
+    if short_term_manager is not None and session is not None and user_message and response:
+        short_term_manager.append_turn(session, user_message=user_message, assistant_message=response)
+
+    auto_memory = None
+    if memory_enabled and memory_write_enabled and memory_service is not None and user_id and user_message:
+        auto_memory = memory_service.extract_and_store(user_id=user_id, user_message=user_message)
+
+    return {
+        **state,
+        "auto_memory": auto_memory.id if auto_memory else None,
+    }
+
+
+# Future node implementations (Phase 3+):
 
 def memory_node(state: Dict[str, Any], memory_store) -> Dict[str, Any]:
     """

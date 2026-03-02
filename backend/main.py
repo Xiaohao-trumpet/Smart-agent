@@ -4,18 +4,22 @@ Provides HTTP API endpoints for the conversational AI system.
 """
 
 import time
-from typing import Optional
+from typing import Optional, Any
 from contextlib import asynccontextmanager
+import json
+import uuid
 
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field, ConfigDict
 import logging
 
 from .config import get_model_config, get_app_config
 from .models.universal_chat import UniversalChat
 from .agents.graph import create_chat_graph
 from .session_store import get_session_store
+from .memory import build_memory_service, ShortTermMemoryManager
 from .prompts.prompt_factory import get_prompt_factory
 from .utils.logging import setup_logging, get_logger
 from .utils.exceptions import (
@@ -36,12 +40,14 @@ logger = get_logger(__name__)
 model_client: Optional[UniversalChat] = None
 chat_graph = None
 session_store = None
+memory_service = None
+short_term_memory = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    global model_client, chat_graph, session_store
+    global model_client, chat_graph, session_store, memory_service, short_term_memory
     
     logger.info("Starting application...")
     
@@ -60,13 +66,30 @@ async def lifespan(app: FastAPI):
     )
     logger.info(f"Initialized model client: {model_config.model_name}")
     
-    # Initialize chat graph
-    chat_graph = create_chat_graph(model_client)
-    logger.info("Initialized chat graph")
-    
     # Initialize session store
     session_store = get_session_store(ttl_seconds=app_config.SESSION_TTL_SECONDS)
     logger.info("Initialized session store")
+
+    # Initialize memory services
+    short_term_memory = ShortTermMemoryManager(
+        window_turns=app_config.SHORT_TERM_WINDOW_TURNS,
+        enable_summary=app_config.SHORT_TERM_ENABLE_SUMMARY,
+        summary_trigger_turns=app_config.SHORT_TERM_SUMMARY_TRIGGER_TURNS,
+        summary_max_chars=app_config.SHORT_TERM_SUMMARY_MAX_CHARS,
+    )
+    memory_service = build_memory_service(app_config=app_config, model_config=model_config)
+    logger.info("Initialized memory services")
+
+    # Initialize chat graph with memory hooks
+    chat_graph = create_chat_graph(
+        model_client=model_client,
+        short_term_manager=short_term_memory,
+        memory_service=memory_service if app_config.LONG_TERM_MEMORY_ENABLED else None,
+        memory_enabled=app_config.MEMORY_ENABLED,
+        memory_write_enabled=app_config.MEMORY_WRITE_ENABLED,
+        memory_top_k=app_config.MEMORY_SEARCH_TOP_K,
+    )
+    logger.info("Initialized chat graph")
     
     yield
     
@@ -136,9 +159,104 @@ class ChatResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     """Response model for health check."""
+    model_config = ConfigDict(protected_namespaces=())
+
     status: str
     model_name: str
     active_sessions: int
+
+
+class ModelCard(BaseModel):
+    """OpenAI-compatible model card."""
+    id: str
+    object: str = "model"
+    created: int = Field(default_factory=lambda: int(time.time()))
+    owned_by: str = "conversational-ai-system"
+
+
+class ModelListResponse(BaseModel):
+    """OpenAI-compatible model list response."""
+    object: str = "list"
+    data: list[ModelCard]
+
+
+class OpenAIChatMessage(BaseModel):
+    """OpenAI-compatible chat message."""
+    role: str
+    content: Any
+
+
+class OpenAIChatCompletionRequest(BaseModel):
+    """OpenAI-compatible chat completion request."""
+    model: Optional[str] = None
+    messages: list[OpenAIChatMessage]
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    stream: bool = False
+    user: Optional[str] = None
+
+
+class MemoryCreateRequest(BaseModel):
+    user_id: str = Field(..., description="Owner user id")
+    text: str = Field(..., min_length=1, description="Memory content")
+    tags: Optional[list[str]] = Field(default=None, description="Optional tags")
+    metadata: Optional[dict] = Field(default=None, description="Arbitrary metadata")
+
+
+class MemoryUpdateRequest(BaseModel):
+    text: Optional[str] = Field(default=None, min_length=1, description="Updated memory content")
+    tags: Optional[list[str]] = Field(default=None, description="Updated tags")
+    metadata: Optional[dict] = Field(default=None, description="Updated metadata")
+
+
+class MemoryResponse(BaseModel):
+    id: str
+    user_id: str
+    text: str
+    tags: list[str]
+    created_at: float
+    updated_at: float
+    metadata: dict
+
+
+class MemorySearchRequest(BaseModel):
+    user_id: str = Field(..., description="Owner user id")
+    query: str = Field(..., min_length=1, description="Semantic query")
+    top_k: Optional[int] = Field(default=None, ge=1, le=20, description="Max results")
+
+
+class MemorySearchHit(BaseModel):
+    memory: MemoryResponse
+    score: float
+
+
+class MemorySearchResponse(BaseModel):
+    hits: list[MemorySearchHit]
+
+
+def _extract_text_content(content: Any) -> str:
+    """Extract text from OpenAI content that may be a string or typed parts."""
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                parts.append(str(item.get("text", "")))
+        return "".join(parts).strip()
+
+    return ""
+
+
+def _latest_user_message(messages: list[OpenAIChatMessage]) -> str:
+    """Return the latest user message text from OpenAI messages."""
+    for msg in reversed(messages):
+        if msg.role == "user":
+            text = _extract_text_content(msg.content)
+            if text:
+                return text
+    return ""
 
 
 # Endpoints
@@ -150,6 +268,88 @@ async def health_check():
         model_name=model_config.model_name,
         active_sessions=session_store.get_session_count()
     )
+
+
+@app.get("/api/v1/models", response_model=ModelListResponse)
+@app.get("/v1/models", response_model=ModelListResponse)
+async def list_models():
+    """List available models in OpenAI-compatible format."""
+    return ModelListResponse(
+        data=[ModelCard(id=model_config.model_name)]
+    )
+
+
+@app.post("/api/v1/chat/completions")
+@app.post("/v1/chat/completions")
+async def chat_completions(request: OpenAIChatCompletionRequest):
+    """OpenAI-compatible chat completions endpoint for OpenWebUI."""
+    user_message = _latest_user_message(request.messages)
+    if not user_message:
+        raise HTTPException(status_code=400, detail="No user message found in messages")
+
+    user_id = request.user or "openwebui_user"
+    result = await chat(
+        ChatRequest(
+            user_id=user_id,
+            message=user_message,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+    )
+
+    completion_id = f"chatcmpl-{uuid.uuid4().hex}"
+    created = int(time.time())
+    model_name = request.model or model_config.model_name
+
+    if request.stream:
+        def event_stream():
+            first_chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {"role": "assistant", "content": result.response},
+                    "finish_reason": None
+                }]
+            }
+            final_chunk = {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model_name,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }]
+            }
+            yield f"data: {json.dumps(first_chunk, ensure_ascii=False)}\n\n"
+            yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n"
+            yield "data: [DONE]\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    return {
+        "id": completion_id,
+        "object": "chat.completion",
+        "created": created,
+        "model": model_name,
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": result.response
+            },
+            "finish_reason": "stop"
+        }],
+        "usage": {
+            "prompt_tokens": 0,
+            "completion_tokens": 0,
+            "total_tokens": 0
+        }
+    }
 
 
 @app.post("/api/v1/chat", response_model=ChatResponse)
@@ -172,7 +372,10 @@ async def chat(request: ChatRequest):
         state = {
             "user_id": request.user_id,
             "user_message": request.message,
-            "response": None
+            "response": None,
+            "temperature": request.temperature,
+            "max_tokens": request.max_tokens,
+            "session": session,
         }
         
         # Invoke the chat graph
@@ -228,6 +431,92 @@ async def chat_stream(request: ChatRequest):
         "status": "not_implemented",
         "message": "Streaming support will be added in Phase 2"
     }
+
+
+def _memory_to_response(item) -> MemoryResponse:
+    return MemoryResponse(
+        id=item.id,
+        user_id=item.user_id,
+        text=item.text,
+        tags=item.tags,
+        created_at=item.created_at,
+        updated_at=item.updated_at,
+        metadata=item.metadata,
+    )
+
+
+@app.post("/api/v1/memory", response_model=MemoryResponse)
+async def add_memory(request: MemoryCreateRequest):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    item = memory_service.add_memory(
+        user_id=request.user_id,
+        text=request.text,
+        tags=request.tags,
+        metadata=request.metadata,
+    )
+    return _memory_to_response(item)
+
+
+@app.get("/api/v1/memory", response_model=list[MemoryResponse])
+async def list_memory(user_id: str):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    items = memory_service.list_memories(user_id=user_id)
+    return [_memory_to_response(item) for item in items]
+
+
+@app.get("/api/v1/memory/{memory_id}", response_model=MemoryResponse)
+async def get_memory(memory_id: str):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    item = memory_service.get_memory(memory_id=memory_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return _memory_to_response(item)
+
+
+@app.put("/api/v1/memory/{memory_id}", response_model=MemoryResponse)
+async def update_memory(memory_id: str, request: MemoryUpdateRequest):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    item = memory_service.update_memory(
+        memory_id=memory_id,
+        text=request.text,
+        tags=request.tags,
+        metadata=request.metadata,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return _memory_to_response(item)
+
+
+@app.delete("/api/v1/memory/{memory_id}")
+async def delete_memory(memory_id: str):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    deleted = memory_service.delete_memory(memory_id=memory_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return {"status": "success", "message": f"Memory {memory_id} deleted"}
+
+
+@app.post("/api/v1/memory/search", response_model=MemorySearchResponse)
+async def search_memory(request: MemorySearchRequest):
+    if memory_service is None:
+        raise HTTPException(status_code=503, detail="Memory service unavailable")
+    top_k = request.top_k or app_config.MEMORY_SEARCH_TOP_K
+    hits = memory_service.search_memories(
+        user_id=request.user_id,
+        query=request.query,
+        top_k=top_k,
+    )
+    return MemorySearchResponse(
+        hits=[
+            MemorySearchHit(memory=_memory_to_response(hit.memory), score=hit.score)
+            for hit in hits
+        ]
+    )
 
 
 @app.delete("/api/v1/session/{user_id}")

@@ -13,6 +13,14 @@ This is Phase 1 of an agentic customer support chatbot platform. The system prov
 - **Structured logging and configuration management**
 - **Externalized prompt management**
 
+Phase 2 memory system is now available:
+
+- **Short-term memory**: session sliding window with optional summary compaction
+- **Long-term memory**: local persistent semantic memory with CRUD and search APIs
+- **LangGraph memory integration**: retrieve-before-generation and optional write-after-response
+
+Detailed spec: `docs/MEMORY_SYSTEM.md`
+
 ### Architecture Layers
 
 ```
@@ -172,7 +180,8 @@ This will start:
 # Pull and run OpenWebUI
 docker run -d \
   -p 3000:8080 \
-  -e OPENAI_API_BASE_URL=http://localhost:8000/api/v1 \
+  --add-host=host.docker.internal:host-gateway \
+  -e OPENAI_API_BASE_URL=http://host.docker.internal:8000/api/v1 \
   -e OPENAI_API_KEY=dummy \
   -e WEBUI_AUTH=false \
   --name openwebui \
@@ -264,6 +273,17 @@ Delete a user session and clear conversation history.
 }
 ```
 
+### Memory APIs (Phase 2)
+
+- `POST /api/v1/memory`: add memory item
+- `GET /api/v1/memory?user_id=...`: list user memory items
+- `GET /api/v1/memory/{memory_id}`: get one memory item
+- `PUT /api/v1/memory/{memory_id}`: update memory item
+- `DELETE /api/v1/memory/{memory_id}`: delete memory item
+- `POST /api/v1/memory/search`: semantic search by `user_id + query + top_k`
+
+See `docs/MEMORY_SYSTEM.md` for full payload/response examples.
+
 ## Architecture Overview
 
 ### 1. Frontend Layer (OpenWebUI)
@@ -282,9 +302,11 @@ Delete a user session and clear conversation history.
 
 ### 3. Orchestration Layer (LangGraph)
 
-**Current (Phase 1):**
-- Single `model_node` that calls the LLM
-- Simple flow: Entry → model_node → END
+**Current (Phase 2):**
+- `memory_retrieve_node` to inject short/long-term memory context
+- `model_node` to generate response
+- `memory_write_node` to append short-term turn and optionally persist long-term memory
+- Flow: Entry → memory_retrieve → model → memory_write → END
 
 **Future Extension Points:**
 - `memory_node`: Read/write short-term and long-term memory
@@ -351,6 +373,47 @@ All configuration via environment variables:
 
 ### CORS Configuration
 - `CORS_ORIGINS`: Allowed origins (default: `*`)
+
+### Memory Configuration (Phase 2)
+- `MEMORY_ENABLED`: Toggle memory integration in graph
+- `LONG_TERM_MEMORY_ENABLED`: Toggle long-term semantic retrieval
+- `MEMORY_WRITE_ENABLED`: Toggle automatic memory extraction/write
+- `SHORT_TERM_WINDOW_TURNS`: Sliding window size in turns
+- `SHORT_TERM_ENABLE_SUMMARY`: Enable summary compaction
+- `SHORT_TERM_SUMMARY_TRIGGER_TURNS`: Turn threshold before compaction
+- `SHORT_TERM_SUMMARY_MAX_CHARS`: Summary max length
+- `MEMORY_PERSIST_DIR`: Local persistence directory for memory DB/vector files
+- `MEMORY_VECTOR_BACKEND`: `chroma` or `local`
+- `MEMORY_COLLECTION_NAME`: Vector collection name
+- `MEMORY_SEARCH_TOP_K`: Default retrieval top-k
+- `EMBEDDING_MODEL`: Embedding model name for remote embedding endpoint
+- `EMBEDDING_DIMENSION`: Embedding dimension (also used by fallback)
+- `EMBEDDING_USE_REMOTE`: Use remote embeddings if available; fallback is automatic
+
+## Memory + OpenWebUI Demo
+
+1. Start backend:
+```bash
+python -m backend.main
+```
+2. Start OpenWebUI:
+```bash
+docker run -d -p 3000:8080 \
+  --add-host=host.docker.internal:host-gateway \
+  -e OPENAI_API_BASE_URL=http://host.docker.internal:8000/api/v1 \
+  -e OPENAI_API_KEY=dummy \
+  -e WEBUI_AUTH=false \
+  --name openwebui \
+  ghcr.io/open-webui/open-webui:main
+```
+3. Add a preference memory:
+```bash
+curl -X POST http://localhost:8000/api/v1/memory \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"demo_user","text":"I prefer concise answers.","tags":["preference"]}'
+```
+4. Open `http://localhost:3000`, choose model, and chat as `demo_user`.
+5. Ask style-sensitive prompt, e.g., "How should you answer me?" to verify memory usage.
 
 ## Switching Model Backends
 
@@ -465,7 +528,8 @@ pytest --cov=backend --cov-report=html tests/
 ### OpenWebUI can't connect to backend
 
 - Ensure backend is running: `curl http://localhost:8000/health`
-- Check `OPENAI_API_BASE_URL` in docker-compose.yml
+- On Windows Docker, use `OPENAI_API_BASE_URL=http://host.docker.internal:8000/api/v1` (not `localhost`)
+- Check `OPENAI_API_BASE_URL` in docker-compose.yml or `docker run` args
 - Verify network connectivity between containers
 - Check Docker logs: `docker logs openwebui`
 
@@ -481,6 +545,14 @@ pytest --cov=backend --cov-report=html tests/
 - Adjust `RATE_LIMIT_REQUESTS` and `RATE_LIMIT_WINDOW_SECONDS`
 - Clear rate limit by restarting backend
 - Implement Redis-based rate limiting for production
+
+### Memory troubleshooting
+
+- `GET /api/v1/models` must return 200 for OpenWebUI model list.
+- `POST /api/v1/chat/completions` must return 200 for OpenWebUI chat completion flow.
+- If semantic search seems weak, set `EMBEDDING_USE_REMOTE=true` and verify embedding endpoint availability.
+- Verify persistence files under `MEMORY_PERSIST_DIR` (`memory.db`, vector index files).
+- Use `POST /api/v1/memory/search` directly to validate retrieval quality independent of UI.
 
 ## License
 

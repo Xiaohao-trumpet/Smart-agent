@@ -28,7 +28,10 @@ def test_graph_invoke(mock_model_client):
     initial_state = {
         "user_id": "test_user",
         "user_message": "Hello",
-        "response": None
+        "response": None,
+        "session": None,
+        "temperature": None,
+        "max_tokens": None,
     }
     
     result = graph.invoke(initial_state)
@@ -40,5 +43,8 @@ def test_graph_invoke(mock_model_client):
     # Verify model client was called
     mock_model_client.chat.assert_called_once_with(
         user_id="test_user",
-        message="Hello"
+        message="Hello",
+        temperature=None,
+        max_tokens=None,
+        use_history=False,
     )

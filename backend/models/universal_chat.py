@@ -61,7 +61,7 @@ class UniversalChat:
         # Future: Replace with Redis or database
         self._conversation_history: Dict[str, List[Dict[str, str]]] = {}
     
-    def _get_messages(self, user_id: str, new_message: str) -> List[Dict[str, str]]:
+    def _get_messages(self, user_id: str, new_message: str, use_history: bool = True) -> List[Dict[str, str]]:
         """
         Build the messages list for the API call.
         
@@ -75,7 +75,7 @@ class UniversalChat:
         messages = [{"role": "system", "content": self.system_prompt}]
         
         # Add conversation history
-        if user_id in self._conversation_history:
+        if use_history and user_id in self._conversation_history:
             messages.extend(self._conversation_history[user_id])
         
         # Add new user message
@@ -107,7 +107,8 @@ class UniversalChat:
         user_id: str,
         message: str,
         temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None
+        max_tokens: Optional[int] = None,
+        use_history: bool = True,
     ) -> str:
         """
         Send a message and get a response.
@@ -129,7 +130,7 @@ class UniversalChat:
         max_tokens = max_tokens if max_tokens is not None else self.default_max_tokens
         
         # Build messages
-        messages = self._get_messages(user_id, message)
+        messages = self._get_messages(user_id, message, use_history=use_history)
         
         # Call the API
         try:
@@ -142,8 +143,9 @@ class UniversalChat:
             
             assistant_message = response.choices[0].message.content
             
-            # Update conversation history
-            self._update_history(user_id, message, assistant_message)
+            # Update conversation history when enabled
+            if use_history:
+                self._update_history(user_id, message, assistant_message)
             
             return assistant_message
         

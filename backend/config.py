@@ -64,6 +64,28 @@ class AppConfig:
     # CORS settings
     CORS_ORIGINS: list = os.getenv("CORS_ORIGINS", "*").split(",")
 
+    # Memory system switches
+    MEMORY_ENABLED: bool = os.getenv("MEMORY_ENABLED", "true").lower() == "true"
+    LONG_TERM_MEMORY_ENABLED: bool = os.getenv("LONG_TERM_MEMORY_ENABLED", "true").lower() == "true"
+    MEMORY_WRITE_ENABLED: bool = os.getenv("MEMORY_WRITE_ENABLED", "true").lower() == "true"
+
+    # Short-term memory policy
+    SHORT_TERM_WINDOW_TURNS: int = int(os.getenv("SHORT_TERM_WINDOW_TURNS", "6"))
+    SHORT_TERM_ENABLE_SUMMARY: bool = os.getenv("SHORT_TERM_ENABLE_SUMMARY", "true").lower() == "true"
+    SHORT_TERM_SUMMARY_TRIGGER_TURNS: int = int(os.getenv("SHORT_TERM_SUMMARY_TRIGGER_TURNS", "10"))
+    SHORT_TERM_SUMMARY_MAX_CHARS: int = int(os.getenv("SHORT_TERM_SUMMARY_MAX_CHARS", "800"))
+
+    # Long-term memory persistence and search
+    MEMORY_PERSIST_DIR: str = os.getenv("MEMORY_PERSIST_DIR", "./data/memory")
+    MEMORY_VECTOR_BACKEND: str = os.getenv("MEMORY_VECTOR_BACKEND", "chroma")
+    MEMORY_COLLECTION_NAME: str = os.getenv("MEMORY_COLLECTION_NAME", "user_memories")
+    MEMORY_SEARCH_TOP_K: int = int(os.getenv("MEMORY_SEARCH_TOP_K", "3"))
+
+    # Embedding settings
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "256"))
+    EMBEDDING_USE_REMOTE: bool = os.getenv("EMBEDDING_USE_REMOTE", "true").lower() == "true"
+
 
 def get_model_config() -> ModelConfig:
     """Get the default model configuration."""
