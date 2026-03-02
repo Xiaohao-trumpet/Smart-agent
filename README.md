@@ -15,6 +15,7 @@ Lightweight conversational AI stack with:
 - Chat UI with local conversation history (browser localStorage)
 - Model selection from backend `/api/v1/models` (fallback `/v1/models`)
 - Prompt scene selector + optional system prompt input
+- Phase 3 tool calling with planner + safe executor (kb + tickets)
 - Memory panel:
   - list/add/delete memories
   - semantic memory search
@@ -107,6 +108,67 @@ copy frontend\\.env.example frontend\\.env
   - `POST /api/v1/memory/search`
 - Prompt scenes:
   - `GET /api/v1/prompt-scenes`
+
+## Phase 3: Tool Calling & Automated Prompts
+
+What it does:
+
+- Adds intent routing and ReAct-style tool planning before final response generation.
+- Executes local-first tools safely (allowlist, timeout, rate limit).
+- Builds final prompt dynamically from memory + tool context + user message.
+- Keeps OpenWebUI compatibility (`/v1/models`, `/v1/chat/completions`) while running tools internally.
+
+Enable/disable tools:
+
+- Set `TOOLS_ENABLED=true|false` in `.env`.
+
+Configure tool storage paths:
+
+- `KB_FILE_PATH=./data/kb/faq.json`
+- `TICKET_DB_PATH=./data/tickets/tickets.db`
+
+Add a new tool:
+
+1. Add schema models in `backend/tools/schemas.py`.
+2. Implement and register the tool in `backend/tools/builtin.py`.
+3. Add tool name to `TOOLS_ALLOWLIST`.
+4. Extend `backend/tools/planner.py` routing logic if auto-selection is needed.
+5. Add focused tests in `tests/`.
+
+### Demo via curl
+
+Create ticket:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"qwen-plus\",\"user\":\"demo_user\",\"messages\":[{\"role\":\"user\",\"content\":\"I want to open a support ticket for my internet not working\"}]}"
+```
+
+KB policy query:
+
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions ^
+  -H "Content-Type: application/json" ^
+  -d "{\"model\":\"qwen-plus\",\"user\":\"demo_user\",\"messages\":[{\"role\":\"user\",\"content\":\"What is your refund policy?\"}]}"
+```
+
+Inspect trace with internal chat endpoint:
+
+```bash
+curl -X POST http://localhost:8000/api/v1/chat ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":\"demo_user\",\"message\":\"I want to open a support ticket for my internet not working\"}"
+```
+
+### Demo via OpenWebUI
+
+1. Keep OpenWebUI pointing to this backend OpenAI-compatible base URL.
+2. Start chat in browser and ask:
+   - `I want to open a support ticket for my internet not working`
+   - `What is your refund policy?`
+3. Backend internally plans and executes tools; OpenWebUI remains unaware of internal tool mechanics.
+4. If OpenWebUI sends `stream=true`, backend currently returns a single content chunk and `[DONE]`.
 
 ## Verification
 

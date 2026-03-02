@@ -94,6 +94,18 @@ class AppConfig:
         os.getenv("DASHSCOPE_API_KEY", os.getenv("API_KEY", "")),
     )
 
+    # Phase 3 tool calling
+    TOOLS_ENABLED: bool = os.getenv("TOOLS_ENABLED", "true").lower() == "true"
+    TOOLS_ALLOWLIST: list = os.getenv(
+        "TOOLS_ALLOWLIST",
+        "kb_search,create_ticket,get_ticket,list_tickets",
+    ).split(",")
+    TOOL_MAX_CALLS_PER_TURN: int = int(os.getenv("TOOL_MAX_CALLS_PER_TURN", "3"))
+    TOOL_TIMEOUT_SECONDS: float = float(os.getenv("TOOL_TIMEOUT_SECONDS", "3.0"))
+    TOOL_RATE_LIMIT_PER_MINUTE: int = int(os.getenv("TOOL_RATE_LIMIT_PER_MINUTE", "30"))
+    KB_FILE_PATH: str = os.getenv("KB_FILE_PATH", "./data/kb/faq.json")
+    TICKET_DB_PATH: str = os.getenv("TICKET_DB_PATH", "./data/tickets/tickets.db")
+
 
 def get_model_config() -> ModelConfig:
     """Get the default model configuration."""

@@ -1,0 +1,21 @@
+[
+  {
+    "id": "refund_policy",
+    "question": "What is your refund policy?",
+    "answer": "Refund requests are accepted within 7 days for technical failures. Include your order ID and issue details when contacting support.",
+    "tags": ["refund", "billing", "policy"]
+  },
+  {
+    "id": "internet_troubleshooting",
+    "question": "My internet is not working. What should I do first?",
+    "answer": "Check router power, cable connection, and restart the modem for 30 seconds. If service is still down, create a support ticket with your location and outage time.",
+    "tags": ["internet", "network", "troubleshooting"]
+  },
+  {
+    "id": "ticket_response_time",
+    "question": "How fast do support tickets get a response?",
+    "answer": "High and urgent tickets are reviewed first. Typical first response time is within 4 business hours.",
+    "tags": ["ticket", "support", "sla"]
+  }
+]
+

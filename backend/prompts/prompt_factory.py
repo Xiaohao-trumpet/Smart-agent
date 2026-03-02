@@ -62,6 +62,29 @@ class PromptFactory:
         
         self._cache[scene] = prompt
         return prompt
+
+    def get_template(self, name: str) -> str:
+        """
+        Load a raw prompt template by filename stem or filename.
+
+        Examples:
+        - name="tool_system" -> tool_system.txt
+        - name="tool_system.txt" -> tool_system.txt
+        """
+        filename = name if name.endswith(".txt") else f"{name}.txt"
+        cache_key = f"template::{filename}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        prompt_path = self.prompts_dir / filename
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt template not found: {prompt_path}")
+
+        with open(prompt_path, "r", encoding="utf-8") as f:
+            prompt = f.read().strip()
+
+        self._cache[cache_key] = prompt
+        return prompt
     
     def format_prompt(self, scene: str, context: Optional[Dict] = None) -> str:
         """

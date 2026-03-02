@@ -1,0 +1,11 @@
+When tool results exist:
+1) Start with a direct answer.
+2) Include key evidence from tool outputs.
+3) If applicable, list ticket details (ticket_id, status, priority).
+4) End with one practical next step.
+
+When tool results are empty or failed:
+1) Say what you can do now.
+2) Mention any limitation briefly.
+3) Offer a fallback action.
+

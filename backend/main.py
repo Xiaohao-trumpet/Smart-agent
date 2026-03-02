@@ -21,6 +21,15 @@ from .agents.graph import create_chat_graph
 from .session_store import get_session_store
 from .memory import build_memory_service, ShortTermMemoryManager
 from .prompts.prompt_factory import get_prompt_factory
+from .prompts.builder import PromptBuilder
+from .tools import (
+    ToolRegistry,
+    ToolPlanner,
+    ToolExecutor,
+    FAQStore,
+    TicketStore,
+    register_builtin_tools,
+)
 from .utils.logging import setup_logging, get_logger
 from .utils.exceptions import (
     ModelAPIException,
@@ -42,12 +51,17 @@ chat_graph = None
 session_store = None
 memory_service = None
 short_term_memory = None
+tool_registry = None
+tool_planner = None
+tool_executor = None
+prompt_builder = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global model_client, chat_graph, session_store, memory_service, short_term_memory
+    global tool_registry, tool_planner, tool_executor, prompt_builder
     
     logger.info("Starting application...")
     
@@ -80,14 +94,39 @@ async def lifespan(app: FastAPI):
     memory_service = build_memory_service(app_config=app_config, model_config=model_config)
     logger.info("Initialized memory services")
 
+    # Initialize tool subsystem
+    faq_store = FAQStore(kb_path=app_config.KB_FILE_PATH)
+    ticket_store = TicketStore(db_path=app_config.TICKET_DB_PATH)
+    tool_registry = ToolRegistry()
+    register_builtin_tools(tool_registry, faq_store=faq_store, ticket_store=ticket_store)
+    tool_planner = ToolPlanner(
+        tools_enabled=app_config.TOOLS_ENABLED,
+        max_calls_per_turn=app_config.TOOL_MAX_CALLS_PER_TURN,
+    )
+    tool_executor = ToolExecutor(
+        registry=tool_registry,
+        allowlist=[name.strip() for name in app_config.TOOLS_ALLOWLIST if name.strip()],
+        timeout_seconds=app_config.TOOL_TIMEOUT_SECONDS,
+        rate_limit_per_minute=app_config.TOOL_RATE_LIMIT_PER_MINUTE,
+        max_calls_per_turn=app_config.TOOL_MAX_CALLS_PER_TURN,
+    )
+    prompt_builder = PromptBuilder(prompt_factory=prompt_factory)
+    logger.info("Initialized tool subsystem")
+
     # Initialize chat graph with memory hooks
     chat_graph = create_chat_graph(
         model_client=model_client,
         short_term_manager=short_term_memory,
         memory_service=memory_service if app_config.LONG_TERM_MEMORY_ENABLED else None,
+        tool_planner=tool_planner,
+        tool_executor=tool_executor,
+        tool_registry=tool_registry,
+        prompt_builder=prompt_builder,
+        prompt_scene=model_config.system_prompt_scene,
         memory_enabled=app_config.MEMORY_ENABLED,
         memory_write_enabled=app_config.MEMORY_WRITE_ENABLED,
         memory_top_k=app_config.MEMORY_SEARCH_TOP_K,
+        tools_enabled=app_config.TOOLS_ENABLED,
     )
     logger.info("Initialized chat graph")
     
@@ -431,6 +470,10 @@ async def chat(request: ChatRequest):
         trace_payload = {
             "retrieved_memories": result.get("retrieved_memories", []),
             "auto_memory": result.get("auto_memory"),
+            "intent": result.get("intent"),
+            "tool_plan": result.get("tool_plan", []),
+            "tool_results": result.get("tool_results", []),
+            "tool_errors": result.get("tool_errors", []),
             "tools": result.get("tools_used", []),
         }
         

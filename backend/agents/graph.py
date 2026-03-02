@@ -5,7 +5,13 @@ Phase 1: Single model node with extension points for future phases.
 
 from typing import TypedDict, Optional, Any, List
 from langgraph.graph import StateGraph, END
-from .node_calls import model_node, memory_retrieve_node, memory_write_node
+from .node_calls import (
+    memory_retrieve_node,
+    planner_node,
+    tool_execute_node,
+    final_response_node,
+    memory_write_node,
+)
 
 
 class ChatState(TypedDict):
@@ -31,7 +37,13 @@ class ChatState(TypedDict):
     max_tokens: Optional[int]
     session: Any
     model_input_message: Optional[str]
+    short_context_text: Optional[str]
     retrieved_memories: List[dict]
+    intent: Optional[str]
+    tool_plan: List[dict]
+    tool_results: List[dict]
+    tool_errors: List[str]
+    needs_tools: bool
     auto_memory: Optional[str]
 
 
@@ -39,15 +51,21 @@ def create_chat_graph(
     model_client,
     short_term_manager=None,
     memory_service=None,
+    tool_planner=None,
+    tool_executor=None,
+    tool_registry=None,
+    prompt_builder=None,
+    prompt_scene: str = "default",
     memory_enabled: bool = True,
     memory_write_enabled: bool = True,
     memory_top_k: int = 3,
+    tools_enabled: bool = True,
 ):
     """
     Create and compile the chat graph.
     
     Phase 2 flow:
-    Entry → memory_retrieve_node → model_node → memory_write_node → END
+    Entry → memory_retrieve → planner → tool_execute → final_response → memory_write → END
     
     Future phases will add:
     - memory_node: Read/write short-term and long-term memory
@@ -79,8 +97,34 @@ def create_chat_graph(
         ),
     )
 
-    # Model response generation.
-    workflow.add_node("model", lambda state: model_node(state, model_client))
+    workflow.add_node(
+        "planner",
+        lambda state: planner_node(
+            state=state,
+            tool_planner=tool_planner,
+            tools_enabled=tools_enabled,
+        ),
+    )
+
+    workflow.add_node(
+        "tool_execute",
+        lambda state: tool_execute_node(
+            state=state,
+            tool_executor=tool_executor,
+            tools_enabled=tools_enabled,
+        ),
+    )
+
+    workflow.add_node(
+        "final_response",
+        lambda state: final_response_node(
+            state=state,
+            model_client=model_client,
+            prompt_builder=prompt_builder,
+            prompt_scene=prompt_scene,
+            tool_registry=tool_registry,
+        ),
+    )
 
     # Memory writeback after model output.
     workflow.add_node(
@@ -104,8 +148,10 @@ def create_chat_graph(
     workflow.set_entry_point("memory_retrieve")
     
     # Add edges
-    workflow.add_edge("memory_retrieve", "model")
-    workflow.add_edge("model", "memory_write")
+    workflow.add_edge("memory_retrieve", "planner")
+    workflow.add_edge("planner", "tool_execute")
+    workflow.add_edge("tool_execute", "final_response")
+    workflow.add_edge("final_response", "memory_write")
     workflow.add_edge("memory_write", END)
     
     # Future edges (examples):
