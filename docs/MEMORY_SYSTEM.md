@@ -161,9 +161,11 @@ Memory env vars:
 - `MEMORY_VECTOR_BACKEND=chroma|local`
 - `MEMORY_COLLECTION_NAME=user_memories`
 - `MEMORY_SEARCH_TOP_K=3`
-- `EMBEDDING_MODEL=text-embedding-3-small`
+- `EMBEDDING_MODEL=text-embedding-v4`
 - `EMBEDDING_DIMENSION=256`
 - `EMBEDDING_USE_REMOTE=true|false`
+- `EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1`
+- `EMBEDDING_API_KEY=<dashscope_api_key>`
 
 ## 7. Operations
 
@@ -188,4 +190,3 @@ Memory env vars:
 - Replace local/chroma vector index with managed vector DB.
 - Replace rule-based extractor with model-based extraction classifier.
 - Add per-tenant namespaces, retention policies, and encryption-at-rest.
-

@@ -145,33 +145,94 @@ class MemoryService:
             lines.append(f"- ({item.score:.3f}) {item.memory.text}")
         return "Relevant long-term memories:\n" + "\n".join(lines)
 
+    @staticmethod
+    def _canonicalize_text(text: str) -> str:
+        lowered = text.strip().lower()
+        lowered = re.sub(r"\s+", " ", lowered)
+        # Remove punctuation/symbols while keeping latin, digits, underscore, and CJK.
+        lowered = re.sub(r"[^\w\u4e00-\u9fff ]+", "", lowered)
+        return lowered.strip()
+
+    @staticmethod
+    def _extract_latest_user_text(text: str) -> str:
+        marker = "Current user message:"
+        idx = text.rfind(marker)
+        if idx != -1:
+            candidate = text[idx + len(marker) :].strip()
+            if candidate:
+                return candidate
+        return text.strip()
+
+    def _is_duplicate_memory(self, user_id: str, text: str) -> bool:
+        candidate = self._canonicalize_text(text)
+        if not candidate:
+            return True
+        for existing in self.repository.list_by_user(user_id):
+            if self._canonicalize_text(existing.text) == candidate:
+                return True
+        return False
+
+    @staticmethod
+    def _looks_like_stable_fact(text: str) -> bool:
+        normalized = text.strip()
+        if len(normalized) < 5 or len(normalized) > 300:
+            return False
+        if normalized.endswith("?") or normalized.endswith("？"):
+            return False
+
+        lower = normalized.lower()
+        patterns = [
+            r"\bmy name is\b",
+            r"\bcall me\b",
+            r"\bi am\b.+\byears old\b",
+            r"\bi'm\b.+\byears old\b",
+            r"\bmy shoe size is\b",
+            r"\bmy (birthday|birth date|hometown|city|location|address|email|phone number) is\b",
+            r"\bi live in\b",
+            r"\bi am from\b",
+            r"\bi'm from\b",
+            r"\bi work (at|as)\b",
+            r"\bmy job is\b",
+            r"\bi prefer\b",
+            r"\bmy preference is\b",
+            r"\bi like\b",
+            r"\bi dislike\b",
+            r"\bi love\b",
+            r"\bi hate\b",
+            r"\bplease always\b",
+            r"\bplease never\b",
+            r"我叫",
+            r"我的名字是",
+            r"请叫我",
+            r"我今年\d+岁",
+            r"我的鞋码是",
+            r"我的生日是",
+            r"我住在",
+            r"我来自",
+            r"我在.+工作",
+            r"我喜欢",
+            r"我不喜欢",
+            r"我偏好",
+        ]
+        return any(re.search(pattern, lower) for pattern in patterns)
+
     def extract_and_store(self, user_id: str, user_message: str) -> Optional[MemoryItem]:
         """
         Rule-based memory extraction.
         Captures durable preferences and stable personal facts from user messages.
         """
-        text = user_message.strip()
-        if len(text) < 8:
+        text = self._extract_latest_user_text(user_message)
+        if not self._looks_like_stable_fact(text):
             return None
 
-        preference_patterns = [
-            r"\bi prefer\b",
-            r"\bmy preference is\b",
-            r"\bi like\b",
-            r"\bi dislike\b",
-            r"\bplease always\b",
-            r"\bplease never\b",
-            r"\bcall me\b",
-            r"\bmy name is\b",
-        ]
-        if not any(re.search(pattern, text.lower()) for pattern in preference_patterns):
+        if self._is_duplicate_memory(user_id=user_id, text=text):
             return None
 
         return self.add_memory(
             user_id=user_id,
             text=text,
-            tags=["auto_extracted", "user_preference"],
-            metadata={"source": "rule_extractor"},
+            tags=["auto_extracted", "user_profile"],
+            metadata={"source": "rule_extractor", "version": "v2"},
         )
 
 
@@ -181,8 +242,8 @@ def build_memory_service(app_config: AppConfig, model_config: ModelConfig) -> Me
 
     repository = MemoryRepository(db_path=str(persist_dir / "memory.db"))
     embeddings = EmbeddingProvider(
-        base_url=model_config.base_url,
-        api_key=model_config.api_key,
+        base_url=app_config.EMBEDDING_BASE_URL,
+        api_key=app_config.EMBEDDING_API_KEY,
         embedding_model=app_config.EMBEDDING_MODEL,
         dimension=app_config.EMBEDDING_DIMENSION,
         use_remote=app_config.EMBEDDING_USE_REMOTE,
@@ -197,4 +258,3 @@ def build_memory_service(app_config: AppConfig, model_config: ModelConfig) -> Me
         embedding_provider=embeddings,
         vector_index=vector_index,
     )
-

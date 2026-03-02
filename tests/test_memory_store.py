@@ -81,6 +81,44 @@ def test_rule_based_memory_extraction():
             user_message="Please always answer in bullet points and concise style.",
         )
         assert auto is not None
-        assert "user_preference" in auto.tags
+        assert "user_profile" in auto.tags
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_rule_based_extraction_stable_facts_and_dedup():
+    tmp_dir = _make_local_tmp_dir()
+    try:
+        service = build_local_service(tmp_dir)
+
+        name_item = service.extract_and_store(user_id="u3", user_message="My name is Xiaohao.")
+        assert name_item is not None
+        assert name_item.text == "My name is Xiaohao."
+
+        # Duplicate should not be stored again.
+        duplicate = service.extract_and_store(user_id="u3", user_message="My name is Xiaohao!")
+        assert duplicate is None
+
+        shoe_item = service.extract_and_store(user_id="u3", user_message="My shoe size is 30.")
+        assert shoe_item is not None
+
+        stored = service.list_memories("u3")
+        assert len(stored) == 2
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def test_rule_based_extraction_from_composed_message_uses_latest_user_part():
+    tmp_dir = _make_local_tmp_dir()
+    try:
+        service = build_local_service(tmp_dir)
+        composed = (
+            "System instructions:\nYou are helpful.\n\n"
+            "Conversation so far:\nuser: hi\nassistant: hello\n\n"
+            "Current user message:\nMy shoe size is 30"
+        )
+        item = service.extract_and_store(user_id="u4", user_message=composed)
+        assert item is not None
+        assert item.text == "My shoe size is 30"
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

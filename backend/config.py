@@ -82,9 +82,17 @@ class AppConfig:
     MEMORY_SEARCH_TOP_K: int = int(os.getenv("MEMORY_SEARCH_TOP_K", "3"))
 
     # Embedding settings
-    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
+    EMBEDDING_MODEL: str = os.getenv("EMBEDDING_MODEL", "text-embedding-v4")
     EMBEDDING_DIMENSION: int = int(os.getenv("EMBEDDING_DIMENSION", "256"))
     EMBEDDING_USE_REMOTE: bool = os.getenv("EMBEDDING_USE_REMOTE", "true").lower() == "true"
+    EMBEDDING_BASE_URL: str = os.getenv(
+        "EMBEDDING_BASE_URL",
+        os.getenv("BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+    )
+    EMBEDDING_API_KEY: str = os.getenv(
+        "EMBEDDING_API_KEY",
+        os.getenv("DASHSCOPE_API_KEY", os.getenv("API_KEY", "")),
+    )
 
 
 def get_model_config() -> ModelConfig:

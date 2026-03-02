@@ -67,6 +67,8 @@ Set at least:
 - `MODEL_NAME`
 - `BASE_URL`
 - `API_KEY`
+- `EMBEDDING_MODEL` (recommended: `text-embedding-v4`)
+- `EMBEDDING_API_KEY` (or reuse `API_KEY`)
 
 ## Run Dev (One Command)
 
@@ -173,4 +175,3 @@ npm run build
   - Verify `.env` has memory enabled and backend logs show memory services initialized.
 - Frontend cannot reach backend:
   - Check `frontend/.env` `VITE_API_BASE_URL` and browser devtools network errors.
-
