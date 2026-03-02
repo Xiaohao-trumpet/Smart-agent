@@ -4,6 +4,9 @@ Provides a plug-and-play interface to OpenAI-compatible backends.
 """
 
 from typing import List, Dict, Optional, AsyncIterator
+from ..utils.httpx_compat import patch_httpx_for_openai
+
+patch_httpx_for_openai()
 from openai import OpenAI
 import time
 

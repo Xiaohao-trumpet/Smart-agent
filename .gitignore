@@ -53,3 +53,7 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+
+# Frontend
+frontend/node_modules/
+frontend/dist/

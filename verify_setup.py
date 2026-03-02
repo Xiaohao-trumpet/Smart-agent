@@ -125,7 +125,9 @@ def main():
     # Frontend
     print("Checking frontend...")
     checks.append(check_directory("frontend", "Frontend directory"))
-    checks.append(check_file("frontend/docker-compose.yml", "Docker Compose"))
+    checks.append(check_file("frontend/package.json", "Frontend package"))
+    checks.append(check_file("frontend/index.html", "Frontend HTML"))
+    checks.append(check_file("frontend/src/App.tsx", "Frontend app"))
     print()
     
     # Dependencies
@@ -154,9 +156,9 @@ def main():
         print()
         print("Next steps:")
         print("1. Configure .env with your API key")
-        print("2. Run: python run_backend.py")
-        print("3. Test: curl http://localhost:8000/health")
-        print("4. Start OpenWebUI: cd frontend && docker-compose up -d")
+        print("2. Install frontend deps: cd frontend && npm install")
+        print("3. Run: python run_all.py")
+        print("4. Open: http://localhost:3000")
         return 0
     else:
         print("✗ Some checks failed. Please fix the issues above.")

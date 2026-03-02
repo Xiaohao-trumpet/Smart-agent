@@ -155,6 +155,7 @@ class ChatResponse(BaseModel):
     """Response model for chat endpoint."""
     response: str = Field(..., description="Assistant's response")
     latency_ms: float = Field(..., description="End-to-end processing time in milliseconds")
+    trace: Optional[dict] = Field(default=None, description="Optional execution trace metadata")
 
 
 class HealthResponse(BaseModel):
@@ -259,6 +260,28 @@ def _latest_user_message(messages: list[OpenAIChatMessage]) -> str:
     return ""
 
 
+def _collect_system_messages(messages: list[OpenAIChatMessage]) -> str:
+    parts = []
+    for msg in messages:
+        if msg.role == "system":
+            text = _extract_text_content(msg.content)
+            if text:
+                parts.append(text)
+    return "\n".join(parts).strip()
+
+
+def _render_recent_history(messages: list[OpenAIChatMessage], keep: int = 8) -> str:
+    rendered = []
+    for msg in messages[-keep:]:
+        if msg.role == "system":
+            continue
+        text = _extract_text_content(msg.content)
+        if not text:
+            continue
+        rendered.append(f"{msg.role}: {text}")
+    return "\n".join(rendered).strip()
+
+
 # Endpoints
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
@@ -279,19 +302,40 @@ async def list_models():
     )
 
 
+@app.get("/api/v1/prompt-scenes")
+async def list_prompt_scenes():
+    """List available prompt scenes for frontend selector."""
+    return {
+        "scenes": ["default", "it_helpdesk"],
+        "default_scene": model_config.system_prompt_scene,
+    }
+
+
 @app.post("/api/v1/chat/completions")
 @app.post("/v1/chat/completions")
 async def chat_completions(request: OpenAIChatCompletionRequest):
-    """OpenAI-compatible chat completions endpoint for OpenWebUI."""
+    """OpenAI-compatible chat completions endpoint for external clients."""
     user_message = _latest_user_message(request.messages)
     if not user_message:
         raise HTTPException(status_code=400, detail="No user message found in messages")
 
-    user_id = request.user or "openwebui_user"
+    system_text = _collect_system_messages(request.messages)
+    history_text = _render_recent_history(request.messages[:-1], keep=10)
+
+    composed_message = user_message
+    context_parts = []
+    if system_text:
+        context_parts.append("System instructions:\n" + system_text)
+    if history_text:
+        context_parts.append("Conversation so far:\n" + history_text)
+    if context_parts:
+        composed_message = "\n\n".join(context_parts) + "\n\nCurrent user message:\n" + user_message
+
+    user_id = request.user or "frontend_user"
     result = await chat(
         ChatRequest(
             user_id=user_id,
-            message=user_message,
+            message=composed_message,
             temperature=request.temperature,
             max_tokens=request.max_tokens
         )
@@ -348,7 +392,8 @@ async def chat_completions(request: OpenAIChatCompletionRequest):
             "prompt_tokens": 0,
             "completion_tokens": 0,
             "total_tokens": 0
-        }
+        },
+        "trace": result.trace,
     }
 
 
@@ -383,6 +428,11 @@ async def chat(request: ChatRequest):
         
         # Extract response
         response_text = result.get("response", "")
+        trace_payload = {
+            "retrieved_memories": result.get("retrieved_memories", []),
+            "auto_memory": result.get("auto_memory"),
+            "tools": result.get("tools_used", []),
+        }
         
         # Calculate latency
         latency_ms = (time.time() - start_time) * 1000
@@ -401,7 +451,8 @@ async def chat(request: ChatRequest):
         
         return ChatResponse(
             response=response_text,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            trace=trace_payload,
         )
     
     except RateLimitExceededException as e:

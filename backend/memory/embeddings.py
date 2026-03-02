@@ -7,6 +7,9 @@ import math
 import re
 from typing import List, Optional
 
+from ..utils.httpx_compat import patch_httpx_for_openai
+
+patch_httpx_for_openai()
 from openai import OpenAI
 
 
