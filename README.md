@@ -259,7 +259,7 @@ curl -X POST "http://localhost:8000/api/v1/memory/search" \
 - 论文：<https://arxiv.org/abs/2602.16173>
 - 代码：<https://github.com/facebookresearch/PAHF>
 
-![teaser](.\PAHF\assets\teaser.jpeg)
+![teaser](./PAHF/assets/teaser.jpeg)
 
 ### 2) 本项目中的记忆闭环
 
