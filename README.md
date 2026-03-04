@@ -40,7 +40,7 @@
 
 ## 系统整体流程图
 
-![系统整体流程图](./流程图.png)
+![系统整体流程图](./assets/流程图.png)
 
 上图表达的主链路是：**前端请求 -> FastAPI API Gateway -> LangGraph Orchestrator -> PAHF MemoryBank / Retriever / LLM -> 返回前端**。  
 其中记忆相关关键点：请求前先检索，回复后再抽取并更新，形成闭环。
@@ -259,7 +259,7 @@ curl -X POST "http://localhost:8000/api/v1/memory/search" \
 - 论文：<https://arxiv.org/abs/2602.16173>
 - 代码：<https://github.com/facebookresearch/PAHF>
 
-![teaser](F:\OneDrive\desktop\项目\智能客服\PAHF\assets\teaser.jpeg)
+![teaser](.\PAHF\assets\teaser.jpeg)
 
 ### 2) 本项目中的记忆闭环
 
@@ -317,7 +317,9 @@ curl -X POST "http://localhost:8000/api/v1/memory/search" \
 7. 用户：`我现在鞋码是多少？`
 8. 助手：基于更新后的 PAHF 记忆回答 `31`。
 
-![68ffc353c41d928213d9477f7e282925](C:\Users\周晓昊\xwechat_files\wxid_al6w2xiza20x22_0a51\temp\RWTemp\2026-03\68ffc353c41d928213d9477f7e282925.png)
+![example](./assets/example.png)
+
+
 
 ## 目录结构（真实结构）
 
