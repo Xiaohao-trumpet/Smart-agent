@@ -63,10 +63,10 @@
 
 ```powershell
 # 进入项目根目录
-cd F:\OneDrive\desktop\项目\智能客服
+git clone https://github.com/Xiaohao-trumpet/shopping-agent-with-PAHF-memory-system.git
 
 # 激活环境（必须）
-conda activate servicebot
+conda create -n shopping-agent python=3.10
 
 # 安装本项目依赖（首次）
 pip install -r requirements.txt
@@ -80,14 +80,11 @@ npm install
 cd ..
 
 # 准备配置文件
-Copy-Item .env.example .env
-```
-
 编辑 `.env`，至少配置这三项：
 
 ```env
-MODEL_NAME=qwen-plus
-BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MODEL_NAME= " "
+BASE_URL= " "
 API_KEY=你的模型服务密钥
 ```
 
@@ -156,8 +153,8 @@ CORS_ORIGINS=*
 ### 模型配置
 
 ```env
-MODEL_NAME=qwen-plus
-BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+MODEL_NAME= ''
+BASE_URL= ''
 API_KEY=your_api_key_here
 DEFAULT_TEMPERATURE=0.7
 DEFAULT_MAX_TOKENS=1024
@@ -262,6 +259,8 @@ curl -X POST "http://localhost:8000/api/v1/memory/search" \
 - 论文：<https://arxiv.org/abs/2602.16173>
 - 代码：<https://github.com/facebookresearch/PAHF>
 
+![teaser](F:\OneDrive\desktop\项目\智能客服\PAHF\assets\teaser.jpeg)
+
 ### 2) 本项目中的记忆闭环
 
 在一次用户对话中，记忆按以下顺序工作：
@@ -317,6 +316,8 @@ curl -X POST "http://localhost:8000/api/v1/memory/search" \
 6. 系统：触发相似检测与更新，覆盖/合并旧记忆。
 7. 用户：`我现在鞋码是多少？`
 8. 助手：基于更新后的 PAHF 记忆回答 `31`。
+
+![68ffc353c41d928213d9477f7e282925](C:\Users\周晓昊\xwechat_files\wxid_al6w2xiza20x22_0a51\temp\RWTemp\2026-03\68ffc353c41d928213d9477f7e282925.png)
 
 ## 目录结构（真实结构）
 
