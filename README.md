@@ -1,155 +1,429 @@
-# Conversational AI System
+# 智能客服（PAHF 记忆增强版）
 
-FastAPI + LangGraph + OpenAI-compatible chat endpoints + tool calling, with **PAHF as the only memory system**.
+一个面向真实业务场景的智能客服项目：**FastAPI + LangGraph + OpenAI 兼容接口 + 可观测工具调用 + PAHF 长期记忆系统**。  
+项目重点是“可持续个性化对话”：助手不只会聊天，还能在多轮对话中稳定记住用户事实与偏好，并在后续回复中正确使用。
 
-## Architecture
+## 项目简介（What / Why）
 
-`Frontend (React + Vite) -> FastAPI -> LangGraph -> UniversalChat + PAHFMemoryService -> PAHF MemoryBank (SQLite/FAISS)`
+这个项目解决两个核心问题：
 
-LangGraph execution:
+1. 如何用 OpenAI 兼容接口快速接入任意大模型并落地客服场景。
+2. 如何让助手具备“长期可更新记忆”，而不是每轮都从零开始。
 
-`memory_retrieval_node -> assistant_generation_node -> memory_extraction_node -> memory_update_node`
+本仓库已将旧版自定义记忆系统完全替换为 **PAHF（Meta 论文与开源实现）**，并通过 LangGraph 固化为标准流程：
 
-## Project Structure
+`检索 -> 注入 -> 生成 -> 抽取 -> 更新`
 
-```text
-backend/                 FastAPI app + LangGraph + PAHF integration
-PAHF/                    Official PAHF implementation (local clone)
-frontend/                React + Vite + TypeScript frontend
-tests/                   Pytest tests
-docs/PAHF_MEMORY.md      PAHF memory architecture and API
-docs/FRONTEND.md         Frontend architecture notes
-```
+这样做的直接收益：
 
-## Prerequisites
+- 记忆按 `person_id`（本项目中等价于 `user_id`）隔离，避免串用户。
+- 支持相似记忆检测与更新，减少重复写入。
+- 支持 SQLite / FAISS 持久化，重启后记忆仍可用。
+- 记忆变更过程可通过接口和 trace 直接观测。
 
-- Python 3.11+
-- Node.js 18+
-- Conda env `servicebot` activated
-- Local PAHF repo present at `./PAHF`
-- PAHF requirements already installed in `servicebot`
+## 核心特性（Features）
 
-## Setup
+- **PAHF 作为唯一记忆系统**（无备用实现、无回退分支）
+- **LangGraph 记忆编排节点**：
+  - `memory_retrieval_node`
+  - `assistant_generation_node`
+  - `memory_extraction_node`
+  - `memory_update_node`
+- **OpenAI 兼容 API**：`/v1/models`、`/v1/chat/completions`
+- **FastAPI 业务 API**：健康检查、场景选择、会话对话、PAHF 记忆管理
+- **前端工作台（React + Vite）**：
+  - 对话
+  - 模型/场景切换
+  - PAHF 记忆增改查 / 相似查找
+  - trace 可视化
+- **工具调用子系统**：知识库检索、工单创建/查询（可开关）
 
-1. Backend deps:
+## 系统整体流程图
 
-```bash
+![系统整体流程图](./流程图.png)
+
+上图表达的主链路是：**前端请求 -> FastAPI API Gateway -> LangGraph Orchestrator -> PAHF MemoryBank / Retriever / LLM -> 返回前端**。  
+其中记忆相关关键点：请求前先检索，回复后再抽取并更新，形成闭环。
+
+## 架构概览（模块分层）
+
+- `frontend/`：React + Vite UI，调用后端 OpenAI 兼容接口与记忆接口
+- `backend/main.py`：FastAPI 入口、路由、生命周期初始化
+- `backend/agents/`：LangGraph 工作流与节点实现
+- `backend/pahf_memory/`：PAHF MemoryBank 集成层（SQLite/FAISS、检索、更新）
+- `backend/models/universal_chat.py`：统一模型调用抽象（OpenAI compatible）
+- `backend/tools/`：工具注册、规划、执行与存储
+- `PAHF/`：官方 PAHF 源码（本项目直接导入使用）
+
+## 快速开始（Quickstart）
+
+### 1) 最快启动路径（10 分钟内可跑通）
+
+> 必须使用 conda 环境：`servicebot`
+
+```powershell
+# 进入项目根目录
+cd F:\OneDrive\desktop\项目\智能客服
+
+# 激活环境（必须）
+conda activate servicebot
+
+# 安装本项目依赖（首次）
 pip install -r requirements.txt
-```
 
-2. PAHF deps (from local `PAHF/`):
-
-```bash
+# 安装 PAHF 依赖（首次，使用本地 PAHF 目录）
 pip install -r PAHF/requirements.txt
-```
 
-3. Frontend deps:
-
-```bash
+# 安装前端依赖（首次）
 cd frontend
 npm install
 cd ..
+
+# 准备配置文件
+Copy-Item .env.example .env
 ```
 
-4. Configure env:
+编辑 `.env`，至少配置这三项：
 
-```bash
-copy .env.example .env
+```env
+MODEL_NAME=qwen-plus
+BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+API_KEY=你的模型服务密钥
 ```
 
-Required model settings:
+一键启动前后端：
 
-- `MODEL_NAME`
-- `BASE_URL`
-- `API_KEY`
-
-PAHF memory settings:
-
-- `PAHF_BACKEND=sqlite|faiss` (default `sqlite`)
-- `PAHF_SQLITE_DB_PATH`
-- `PAHF_FAISS_PATH`
-- `PAHF_TOP_K`
-- `PAHF_SIMILARITY_THRESHOLD`
-- `PAHF_QUERY_ENCODER`
-- `PAHF_CONTEXT_ENCODER`
-- `PAHF_ENABLE_PRE_CLARIFICATION`
-- `PAHF_ENABLE_POST_CORRECTION`
-
-## Run
-
-One-command dev:
-
-```bash
+```powershell
 python run_all.py
 ```
 
-Backend only:
+启动后默认访问：
 
-```bash
+- 前端：`http://localhost:3000`
+- 后端健康检查：`http://localhost:8000/health`
+- 模型列表：`http://localhost:8000/api/v1/models`
+
+### 2) 启动成功验证
+
+```powershell
+curl http://localhost:8000/health
+curl http://localhost:8000/api/v1/models
+```
+
+期望：
+
+- `health` 返回 `{"status":"ok", ...}`
+- `models` 返回 `{"object":"list","data":[...]}`
+
+然后打开浏览器 `http://localhost:3000`，输入消息即可对话。
+
+### 3) 开发模式（热更新 / 日志 / 调试）
+
+后端热更新（`run_backend.py` 内置 `reload=True`）：
+
+```powershell
 python run_backend.py
 ```
 
-## API Endpoints Used By Frontend
+前端开发（另开一个终端）：
 
-- `GET /health`
-- `GET /api/v1/models` (fallback `GET /v1/models`)
-- `POST /api/v1/chat/completions`
-- `GET /api/v1/prompt-scenes`
-- PAHF memory endpoints:
-  - `POST /api/v1/memory`
-  - `GET /api/v1/memory?user_id=...`
-  - `GET /api/v1/memory/{memory_id}?user_id=...`
-  - `PUT /api/v1/memory/{memory_id}`
-  - `POST /api/v1/memory/search`
-  - `POST /api/v1/memory/find-similar`
-
-## Memory (PAHF)
-
-PAHF memory behavior in this repo:
-
-- Person-isolated memory (`user_id -> person_id`)
-- DRAGON+ embedding retrieval via PAHF memory banks
-- Pre-action clarification gate
-- Post-action correction/update loop
-- Similarity-based update/overwrite (not append-only)
-- SQLite and FAISS backend options (SQLite default)
-
-Detailed design: [docs/PAHF_MEMORY.md](/F:/OneDrive/desktop/项目/智能客服/docs/PAHF_MEMORY.md)
-
-## Verification Checklist
-
-1. Health check returns `ok`.
-2. New user has empty PAHF memory list.
-3. Chat creates memory automatically from durable preference/fact.
-4. Later chat retrieves memory (visible in trace `retrieved_memories`).
-5. Correction message updates existing memory via similarity-based merge/update.
-
-## Demo Conversation (Memory Evolution)
-
-1. User: `My name is Xiaohao and my shoe size is 30.`
-2. User: `What is my shoe size?`
-   - System should retrieve prior memory.
-3. User: `Actually my shoe size is 31.`
-   - System should update existing similar memory.
-4. User: `What is my shoe size now?`
-   - System should use updated memory.
-
-## Tests
-
-Run all backend tests:
-
-```bash
-pytest
+```powershell
+cd frontend
+npm run dev -- --host 0.0.0.0 --port 3000
 ```
 
-Focused PAHF suites:
+调试建议：
+
+- 将 `.env` 中 `LOG_FORMAT` 设为 `text`，本地日志更易读。
+- 观察前端右侧 `Tools / Trace` 面板，重点看：
+  - `retrieved_memories`
+  - `memory_candidate`
+  - `memory_update`
+- 用记忆接口直接核对持久化结果（见下文 API 示例）。
+
+## 配置说明（.env）
+
+### 基础运行配置
+
+```env
+HOST=0.0.0.0
+PORT=8000
+LOG_LEVEL=INFO
+LOG_FORMAT=json
+CORS_ORIGINS=*
+```
+
+### 模型配置
+
+```env
+MODEL_NAME=qwen-plus
+BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+API_KEY=your_api_key_here
+DEFAULT_TEMPERATURE=0.7
+DEFAULT_MAX_TOKENS=1024
+SYSTEM_PROMPT_SCENE=default
+```
+
+### PAHF 记忆配置（核心）
+
+```env
+PAHF_BACKEND=sqlite
+PAHF_SQLITE_DB_PATH=./data/pahf/pahf_memory.db
+PAHF_FAISS_PATH=./data/pahf/pahf_memory
+PAHF_TOP_K=5
+PAHF_SIMILARITY_THRESHOLD=0.45
+PAHF_QUERY_ENCODER=facebook/dragon-plus-query-encoder
+PAHF_CONTEXT_ENCODER=facebook/dragon-plus-context-encoder
+PAHF_EMBED_DEVICE=
+PAHF_ENABLE_PRE_CLARIFICATION=true
+PAHF_ENABLE_POST_CORRECTION=true
+PAHF_LLM_MODEL=
+```
+
+说明：
+
+- `PAHF_BACKEND` 支持 `sqlite` / `faiss`。
+- 默认使用 `sqlite`（推荐先跑通）。
+- 若使用 `faiss`，需本地环境已具备 FAISS 运行条件。
+
+### 工具子系统配置（可选）
+
+```env
+TOOLS_ENABLED=true
+TOOLS_ALLOWLIST=kb_search,create_ticket,get_ticket,list_tickets
+TOOL_MAX_CALLS_PER_TURN=3
+TOOL_TIMEOUT_SECONDS=3.0
+TOOL_RATE_LIMIT_PER_MINUTE=30
+KB_FILE_PATH=./data/kb/faq.json
+TICKET_DB_PATH=./data/tickets/tickets.db
+```
+
+## API 说明（核心接口 + 示例）
+
+### 健康与模型
+
+- `GET /health`
+- `GET /api/v1/models`
+- `GET /v1/models`（OpenAI 兼容）
+
+### 聊天接口
+
+- `POST /api/v1/chat`
+- `POST /api/v1/chat/completions`
+- `POST /v1/chat/completions`（OpenAI 兼容）
+
+示例：
 
 ```bash
+curl -X POST "http://localhost:8000/v1/chat/completions" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen-plus",
+    "user": "demo_user",
+    "stream": false,
+    "messages": [
+      {"role": "user", "content": "我叫小昊，我的鞋码是30。"}
+    ]
+  }'
+```
+
+### PAHF 记忆接口
+
+- `POST /api/v1/memory`：新增记忆
+- `GET /api/v1/memory?user_id=...`：列出用户记忆
+- `GET /api/v1/memory/{memory_id}?user_id=...`：按 ID 查询
+- `PUT /api/v1/memory/{memory_id}`：更新记忆
+- `POST /api/v1/memory/search`：语义检索
+- `POST /api/v1/memory/find-similar`：查找最相似记忆
+
+示例：新增 + 查询 + 搜索
+
+```bash
+# 新增
+curl -X POST "http://localhost:8000/api/v1/memory" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"demo_user","text":"用户鞋码是30"}'
+
+# 列表
+curl "http://localhost:8000/api/v1/memory?user_id=demo_user"
+
+# 搜索
+curl -X POST "http://localhost:8000/api/v1/memory/search" \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"demo_user","query":"鞋码","top_k":5}'
+```
+
+## 记忆系统详解（PAHF，重点）
+
+### 1) 参考来源
+
+本项目的记忆机制参考并集成了 Meta 提出的 PAHF 思路与官方开源实现：
+
+- 论文：<https://arxiv.org/abs/2602.16173>
+- 代码：<https://github.com/facebookresearch/PAHF>
+
+### 2) 本项目中的记忆闭环
+
+在一次用户对话中，记忆按以下顺序工作：
+
+1. **检索（Retrieval）**
+   - `memory_retrieval_node` 调用 PAHF MemoryBank。
+   - 按 `person_id=user_id` 检索 top-k 相关记忆。
+2. **注入（Injection）**
+   - 检索结果被组织到提示词中（`PAHF Memory Context` / `Retrieved PAHF Memories`）。
+3. **生成（Generation）**
+   - `assistant_generation_node` 在“当前消息 + 检索记忆 + 工具结果”条件下生成回复。
+4. **抽取（Extraction）**
+   - `memory_extraction_node` 判断本轮是否包含“稳定可长期保存”的用户事实/偏好。
+5. **更新（Update）**
+   - `memory_update_node` 执行相似检测：
+     - 无相似 -> 新增
+     - 有相似且同主题 -> 合并并更新
+     - 有相似但不同主题 -> 新增
+
+### 3) 为什么这样设计
+
+- 先检索再生成：保证回复“带着用户画像”进行。
+- 生成后再抽取更新：避免把短暂噪声直接写入长期库。
+- 相似检测 + 同主题判断 + 合并：避免记忆无限重复、降低冲突。
+
+### 4) PAHF 关键能力在本项目中的体现
+
+- **person_id 隔离**：每个 `user_id` 绑定独立记忆命名空间。
+- **相似记忆检测**：通过 `find_similar_memory` 先找候选再决策更新。
+- **去重与覆盖更新**：支持“纠正语句”覆盖旧偏好，而不是仅追加。
+- **持久化**：SQLite/FAISS 后端持久存储。
+- **检索鲁棒性**：基于 DRAGON+ embedding 检索。
+
+### 5) 短期记忆 vs 长期记忆
+
+- **短期记忆**：当前轮与近轮消息上下文（前端会话消息 + 请求消息历史）。
+- **长期记忆**：PAHF MemoryBank 中可持久化的用户稳定事实/偏好。
+
+边界原则：
+
+- 临时上下文用于当下回答；
+- 稳定事实/偏好经过抽取与判断后写入长期记忆。
+
+### 6) 端到端示例场景
+
+示例对话：
+
+1. 用户：`我叫小昊，我的鞋码是30。`
+2. 助手：正常回复后，系统抽取“鞋码是30”并写入 PAHF。
+3. 用户：`我鞋码是多少？`
+4. 助手：检索到长期记忆并回答 `30`。
+5. 用户：`更正一下，我现在鞋码是31。`
+6. 系统：触发相似检测与更新，覆盖/合并旧记忆。
+7. 用户：`我现在鞋码是多少？`
+8. 助手：基于更新后的 PAHF 记忆回答 `31`。
+
+## 目录结构（真实结构）
+
+```text
+.
+├─ backend/
+│  ├─ agents/                 # LangGraph 图与节点
+│  ├─ models/                 # 模型抽象（UniversalChat）
+│  ├─ pahf_memory/            # PAHF 记忆集成实现
+│  ├─ prompts/                # Prompt 模板与构建器
+│  ├─ tools/                  # 工具注册/规划/执行
+│  ├─ utils/                  # 日志/异常/兼容层
+│  ├─ config.py
+│  └─ main.py
+├─ frontend/
+│  ├─ src/
+│  │  ├─ App.tsx              # 对话+记忆+trace UI
+│  │  ├─ api.ts               # 前端 API 调用
+│  │  └─ styles.css
+│  └─ package.json
+├─ PAHF/                      # 官方 PAHF 仓库（本地）
+├─ docs/
+│  ├─ PAHF_MEMORY.md
+│  └─ FRONTEND.md
+├─ tests/
+├─ .env.example
+├─ run_all.py
+├─ run_backend.py
+├─ run_tests.py
+└─ README.md
+```
+
+## 开发指南
+
+### 本地开发推荐流程
+
+```powershell
+# 终端 1：后端（热更新）
+python run_backend.py
+
+# 终端 2：前端
+cd frontend
+npm run dev -- --host 0.0.0.0 --port 3000
+```
+
+### 测试
+
+```powershell
+# 全量
+pytest
+
+# 或使用脚本
+python run_tests.py
+
+# 记忆/图相关重点用例
 pytest tests/test_graph.py tests/test_pahf_memory_api.py -q
 ```
 
-## Troubleshooting
+### 代码风格建议
 
-- If `PAHF_BACKEND=faiss` fails with missing module, switch to `sqlite` or install a compatible FAISS build.
-- First PAHF memory request can be slow due to DRAGON+ encoder loading.
-- See [docs/PAHF_MEMORY.md](/F:/OneDrive/desktop/项目/智能客服/docs/PAHF_MEMORY.md) for detailed troubleshooting.
+- 后端提交前至少运行 `pytest`。
+- 前端提交前至少运行：
+
+```powershell
+cd frontend
+npm run build
+```
+
+## Troubleshooting（常见问题）
+
+1. 模型调用失败（401/403/5xx）
+- 检查 `.env` 的 `API_KEY`、`BASE_URL`、`MODEL_NAME` 是否与供应商一致。
+
+2. 前端打不开或接口跨域失败
+- 检查 `8000/3000` 端口占用。
+- 检查 `CORS_ORIGINS` 配置（本地可先用 `*`）。
+
+3. 首次请求很慢
+- DRAGON+ 编码器首次加载需要时间，属于正常冷启动现象。
+
+4. FAISS 后端不可用
+- 确保本地已正确安装与 Python/系统匹配的 FAISS。
+- 不满足条件时先使用 `PAHF_BACKEND=sqlite`。
+
+5. 记忆未更新
+- 检查 `PAHF_ENABLE_POST_CORRECTION=true`。
+- 在返回 trace 中查看 `memory_candidate` 与 `memory_update`。
+
+6. PAHF 存储路径权限问题
+- 检查 `PAHF_SQLITE_DB_PATH` / `PAHF_FAISS_PATH` 所在目录是否可写。
+
+## Roadmap
+
+- 支持流式输出（`/api/v1/chat/stream` 实装）
+- 丰富工具链与业务插件
+- 增加更细粒度的记忆审计与可视化
+- 增加部署模板（Docker / 云服务）
+
+## License
+
+当前仓库尚未单独声明 License 文件。  
+如用于开源分发，建议补充 `LICENSE`（例如 MIT / Apache-2.0）。
+
+## 致谢 / 引用
+
+- PAHF 论文：**“PAHF”**, arXiv:2602.16173  
+  <https://arxiv.org/abs/2602.16173>
+- 官方实现：Meta Research PAHF  
+  <https://github.com/facebookresearch/PAHF>
+- 相关框架：FastAPI、LangGraph、React、Vite
